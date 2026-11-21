@@ -5994,7 +5994,7 @@ z?d)IV%n2=K9#J(`mv7V>27cwIm->4vg<;G^rQTTyt*8kAd}8`b>U>InpQ_<sd{3ny
 y-p9JAd3EDDd;qU2Aaw(P$kK@aH=p2}t13jlyy$S2ggyWOSX&&~pS9Qd&i?{ZdJ4b*
 
 diff --git a/V2rayNG/app/src/main/java/com/v2ray/ang/AppConfig.kt b/V2rayNG/app/src/main/java/com/v2ray/ang/AppConfig.kt
-index e55b1d5..e24d79b 100644
+index e55b1d5..e0b5fc7 100644
 --- a/V2rayNG/app/src/main/java/com/v2ray/ang/AppConfig.kt
 +++ b/V2rayNG/app/src/main/java/com/v2ray/ang/AppConfig.kt
 @@ -53,6 +53,20 @@ object AppConfig {
@@ -6008,12 +6008,12 @@ index e55b1d5..e24d79b 100644
 +    const val CLICK2RAY_TERMS_URL = "https://sub.vlessfo.ru/#terms"
 +
 +    /**
-+     * Second built-in source: a 250-config pack from a public GitHub list. A pack, not the whole
-+     * list, so a bulk test stays short. It gets its own group tab next to the main source.
++     * Second built-in source: the "super-sub" list of a public GitHub project (MatinGhanbari),
++     * which its README describes as the best configs by test results. It gets its own group tab.
 +     */
 +    const val CLICK2RAY_EXTRA_SUB_URL =
-+        "https://raw.githubusercontent.com/Epodonios/v2ray-configs/refs/heads/main/Sub1.txt"
-+    const val CLICK2RAY_EXTRA_SUB_NAME = "Epodonios 1"
++        "https://raw.githubusercontent.com/MatinGhanbari/v2ray-configs/main/subscriptions/v2ray/super-sub.txt"
++    const val CLICK2RAY_EXTRA_SUB_NAME = "Super Sub"
 +    const val PREF_CLICK2RAY_TERMS_ACCEPTED = "pref_click2ray_terms_accepted"
      const val PREF_DOUBLE_COLUMN_DISPLAY = "pref_double_column_display"
      const val PREF_GROUP_ALL_DISPLAY = "pref_group_all_display"
@@ -11879,7 +11879,7 @@ index b2252d5..ba9d0eb 100644
      <string name="app_tile_first_use">سی کرت ٱولی و کار بوردن ای ویژیی، ٱول ز من برنومه ی سرور ازاف کۊنین</string>
 diff --git a/V2rayNG/app/src/main/res/values-fa/click2ray_strings.xml b/V2rayNG/app/src/main/res/values-fa/click2ray_strings.xml
 new file mode 100644
-index 0000000..6d24a7e
+index 0000000..c716598
 --- /dev/null
 +++ b/V2rayNG/app/src/main/res/values-fa/click2ray_strings.xml
 @@ -0,0 +1,21 @@
@@ -11895,7 +11895,7 @@ index 0000000..6d24a7e
 +    <string name="click2ray_update_done">انجام شد: %1$d کانفیگ سالم، %2$d کانفیگ خراب حذف شد. سریع‌ترین انتخاب شد.</string>
 +
 +    <string name="click2ray_terms_title">شرایط استفاده</string>
-+    <string name="click2ray_terms_body">Click2ray یک فهرست عمومی از کانفیگ‌ها را از sub.vlessfo.ru دریافت می‌کند. آن سایت فقط کانفیگ‌ها را جمع‌آوری می‌کند و مالک یا مدیر سرورها نیست. سرورها متعلق به اشخاص ثالث ناشناس‌اند و هیچ‌کس سرعت، دسترسی یا حریم خصوصی آن‌ها را تضمین نمی‌کند، پس برای کارهای بانکی یا ورود به حساب‌های حساس از آن‌ها استفاده نکن.\n\nClick2ray یک منبع دوم هم اضافه می‌کند: یک فهرست عمومی کانفیگ در GitHub (Epodonios). همین هشدار درباره‌ی آن هم صادق است.\n\nطبق قوانین سایت، این سرویس نباید برای دسترسی به محتوایی که طبق قانون روسیه یا بلاروس ممنوع است استفاده شود و رعایت قانون کشوری که در آن زندگی می‌کنی با خودت است.</string>
++    <string name="click2ray_terms_body">Click2ray یک فهرست عمومی از کانفیگ‌ها را از sub.vlessfo.ru دریافت می‌کند. آن سایت فقط کانفیگ‌ها را جمع‌آوری می‌کند و مالک یا مدیر سرورها نیست. سرورها متعلق به اشخاص ثالث ناشناس‌اند و هیچ‌کس سرعت، دسترسی یا حریم خصوصی آن‌ها را تضمین نمی‌کند، پس برای کارهای بانکی یا ورود به حساب‌های حساس از آن‌ها استفاده نکن.\n\nClick2ray یک منبع دوم هم اضافه می‌کند: یک فهرست عمومی کانفیگ در GitHub (MatinGhanbari). همین هشدار درباره‌ی آن هم صادق است.\n\nطبق قوانین سایت، این سرویس نباید برای دسترسی به محتوایی که طبق قانون روسیه یا بلاروس ممنوع است استفاده شود و رعایت قانون کشوری که در آن زندگی می‌کنی با خودت است.</string>
 +    <string name="click2ray_terms_read">خواندن متن کامل قوانین</string>
 +    <string name="click2ray_terms_accept_label">قوانین استفاده، پیشنهاد عمومی (Public Offer) و سیاست حریم خصوصی را خوانده‌ام و می‌پذیرم.</string>
 +    <string name="click2ray_terms_accept_button">قبول و ادامه</string>
@@ -11966,7 +11966,7 @@ index 3bb3f41..eae48fc 100644
      <string name="app_tile_first_use">首次使用此功能，請使用此應用程式新增伺服器</string>
 diff --git a/V2rayNG/app/src/main/res/values/click2ray_strings.xml b/V2rayNG/app/src/main/res/values/click2ray_strings.xml
 new file mode 100644
-index 0000000..babf402
+index 0000000..5068c1a
 --- /dev/null
 +++ b/V2rayNG/app/src/main/res/values/click2ray_strings.xml
 @@ -0,0 +1,23 @@
@@ -11983,7 +11983,7 @@ index 0000000..babf402
 +    <string name="click2ray_update_done" tools:ignore="MissingTranslation">Done: %1$d working, %2$d removed. The fastest one is selected.</string>
 +
 +    <string name="click2ray_terms_title" tools:ignore="MissingTranslation">Terms of use</string>
-+    <string name="click2ray_terms_body" tools:ignore="MissingTranslation">Click2ray downloads a public list of configurations from sub.vlessfo.ru. That site only collects configurations; it does not own or run the servers. The servers belong to unknown third parties, and nobody guarantees their speed, availability or privacy, so do not use them for banking or other sensitive logins.\n\nClick2ray also adds a second source: a public configuration list on GitHub (Epodonios). The same warning applies to it.\n\nThe site\'s rules say the service must not be used to reach content that is banned by law in Russia or Belarus, and that you are responsible for obeying the law where you live.</string>
++    <string name="click2ray_terms_body" tools:ignore="MissingTranslation">Click2ray downloads a public list of configurations from sub.vlessfo.ru. That site only collects configurations; it does not own or run the servers. The servers belong to unknown third parties, and nobody guarantees their speed, availability or privacy, so do not use them for banking or other sensitive logins.\n\nClick2ray also adds a second source: a public configuration list on GitHub (MatinGhanbari). The same warning applies to it.\n\nThe site\'s rules say the service must not be used to reach content that is banned by law in Russia or Belarus, and that you are responsible for obeying the law where you live.</string>
 +    <string name="click2ray_terms_read" tools:ignore="MissingTranslation">Read the full terms</string>
 +    <string name="click2ray_terms_accept_label" tools:ignore="MissingTranslation">I have read and accept the Terms of Use, Public Offer and Privacy Policy.</string>
 +    <string name="click2ray_terms_accept_button" tools:ignore="MissingTranslation">Accept and continue</string>
