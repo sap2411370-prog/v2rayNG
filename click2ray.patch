@@ -5994,10 +5994,10 @@ z?d)IV%n2=K9#J(`mv7V>27cwIm->4vg<;G^rQTTyt*8kAd}8`b>U>InpQ_<sd{3ny
 y-p9JAd3EDDd;qU2Aaw(P$kK@aH=p2}t13jlyy$S2ggyWOSX&&~pS9Qd&i?{ZdJ4b*
 
 diff --git a/V2rayNG/app/src/main/java/com/v2ray/ang/AppConfig.kt b/V2rayNG/app/src/main/java/com/v2ray/ang/AppConfig.kt
-index e55b1d5..f6ead89 100644
+index e55b1d5..e24d79b 100644
 --- a/V2rayNG/app/src/main/java/com/v2ray/ang/AppConfig.kt
 +++ b/V2rayNG/app/src/main/java/com/v2ray/ang/AppConfig.kt
-@@ -53,6 +53,12 @@ object AppConfig {
+@@ -53,6 +53,20 @@ object AppConfig {
      const val SUBSCRIPTION_MIN_INTERVAL_MINUTES = 15L
      const val PREF_SPEED_ENABLED = "pref_speed_enabled"
      const val PREF_CONFIRM_REMOVE = "pref_confirm_remove"
@@ -6006,6 +6006,14 @@ index e55b1d5..f6ead89 100644
 +    const val CLICK2RAY_SUB_URL = "https://sub.vlessfo.ru/vlessforu/working_configs.txt"
 +    const val CLICK2RAY_SUB_NAME = "Click2ray"
 +    const val CLICK2RAY_TERMS_URL = "https://sub.vlessfo.ru/#terms"
++
++    /**
++     * Second built-in source: a 250-config pack from a public GitHub list. A pack, not the whole
++     * list, so a bulk test stays short. It gets its own group tab next to the main source.
++     */
++    const val CLICK2RAY_EXTRA_SUB_URL =
++        "https://raw.githubusercontent.com/Epodonios/v2ray-configs/refs/heads/main/Sub1.txt"
++    const val CLICK2RAY_EXTRA_SUB_NAME = "Epodonios 1"
 +    const val PREF_CLICK2RAY_TERMS_ACCEPTED = "pref_click2ray_terms_accepted"
      const val PREF_DOUBLE_COLUMN_DISPLAY = "pref_double_column_display"
      const val PREF_GROUP_ALL_DISPLAY = "pref_group_all_display"
@@ -6118,10 +6126,10 @@ index 60cf607..f06a3ea 100644
      data object ExportAll : MainAction
  
 diff --git a/V2rayNG/app/src/main/java/com/v2ray/ang/ui/main/MainDataSource.kt b/V2rayNG/app/src/main/java/com/v2ray/ang/ui/main/MainDataSource.kt
-index 595a344..a347aba 100644
+index 595a344..68b77b9 100644
 --- a/V2rayNG/app/src/main/java/com/v2ray/ang/ui/main/MainDataSource.kt
 +++ b/V2rayNG/app/src/main/java/com/v2ray/ang/ui/main/MainDataSource.kt
-@@ -63,4 +63,14 @@ interface MainDataSource : Closeable {
+@@ -63,4 +63,15 @@ interface MainDataSource : Closeable {
  
      fun syncSubscriptions()
      fun initAssets()
@@ -6131,10 +6139,11 @@ index 595a344..a347aba 100644
 +    fun acceptTerms()
 +
 +    /**
-+     * Click2ray: returns the id of the built-in subscription, creating it when it does not exist.
-+     * Safe to call repeatedly and from several threads; it never creates a duplicate.
++     * Click2ray: returns the id of the subscription with this [url], creating it (named [name])
++     * when it does not exist. Safe to call repeatedly and from several threads; it never creates
++     * a duplicate.
 +     */
-+    fun ensureDefaultSubscription(): String
++    fun ensureBuiltInSubscription(name: String, url: String): String
  }
 diff --git a/V2rayNG/app/src/main/java/com/v2ray/ang/ui/main/MainDrawer.kt b/V2rayNG/app/src/main/java/com/v2ray/ang/ui/main/MainDrawer.kt
 index 1bd2fad..b9df900 100644
@@ -6177,10 +6186,10 @@ index 1bd2fad..b9df900 100644
                      Text(
                          text = stringResource(R.string.app_name),
 diff --git a/V2rayNG/app/src/main/java/com/v2ray/ang/ui/main/MainRepository.kt b/V2rayNG/app/src/main/java/com/v2ray/ang/ui/main/MainRepository.kt
-index fa37a47..8ab813f 100644
+index fa37a47..2fbf0f1 100644
 --- a/V2rayNG/app/src/main/java/com/v2ray/ang/ui/main/MainRepository.kt
 +++ b/V2rayNG/app/src/main/java/com/v2ray/ang/ui/main/MainRepository.kt
-@@ -232,4 +232,28 @@ class MainRepository(
+@@ -232,4 +232,25 @@ class MainRepository(
      override fun initAssets() {
          SettingsManager.initAssets(app, app.assets)
      }
@@ -6193,18 +6202,15 @@ index fa37a47..8ab813f 100644
 +    }
 +
 +    @Synchronized
-+    override fun ensureDefaultSubscription(): String {
++    override fun ensureBuiltInSubscription(name: String, url: String): String {
 +        MmkvManager.decodeSubscriptions()
-+            .firstOrNull { it.subscription.url == AppConfig.CLICK2RAY_SUB_URL }
++            .firstOrNull { it.subscription.url == url }
 +            ?.let { return it.guid }
 +
 +        val guid = Utils.getUuid()
 +        MmkvManager.encodeSubscription(
 +            guid,
-+            SubscriptionItem(
-+                remarks = AppConfig.CLICK2RAY_SUB_NAME,
-+                url = AppConfig.CLICK2RAY_SUB_URL,
-+            )
++            SubscriptionItem(remarks = name, url = url)
 +        )
 +        return guid
 +    }
@@ -6486,7 +6492,7 @@ index 0000000..569d8bd
 +    )
 +}
 diff --git a/V2rayNG/app/src/main/java/com/v2ray/ang/ui/main/MainViewModel.kt b/V2rayNG/app/src/main/java/com/v2ray/ang/ui/main/MainViewModel.kt
-index 40e3bf2..8eb8c39 100644
+index 40e3bf2..978195d 100644
 --- a/V2rayNG/app/src/main/java/com/v2ray/ang/ui/main/MainViewModel.kt
 +++ b/V2rayNG/app/src/main/java/com/v2ray/ang/ui/main/MainViewModel.kt
 @@ -82,7 +82,8 @@ class MainViewModel(
@@ -6547,7 +6553,7 @@ index 40e3bf2..8eb8c39 100644
              cacheMutex.withLock { groupDataCache.clear() }
              reloadAllGroups(_uiState.value.groups.map { it.id })
          }
-@@ -927,6 +940,103 @@ class MainViewModel(
+@@ -927,6 +940,118 @@ class MainViewModel(
          _uiState.update { it.copy(locateTarget = null) }
      }
  
@@ -6567,8 +6573,9 @@ index 40e3bf2..8eb8c39 100644
 +    }
 +
 +    /**
-+     * Download the built-in subscription (replacing its configs), select it, and start a real-delay
++     * Download the subscription of the selected tab (replacing its configs) and start a real-delay
 +     * test of every config in it. [finishUpdateAndTest] completes the flow when the test is done.
++     * A tab that is not a subscription (a local group) falls back to the main built-in source.
 +     */
 +    private fun updateAndTestAll() {
 +        val state = uiState.value
@@ -6582,7 +6589,8 @@ index 40e3bf2..8eb8c39 100644
 +        oneTapJob = viewModelScope.launch {
 +            _isLoading.value = true
 +            try {
-+                val subId = withContext(ioDispatcher) { refreshDefaultSubscription() }
++                val selectedId = state.selectedGroupId
++                val subId = withContext(ioDispatcher) { refreshSubscription(selectedId) }
 +                    ?: return@launch
 +                dataSource.setSelectedSubscriptionId(subId)
 +                _uiState.update { it.copy(selectedGroupId = subId) }
@@ -6607,9 +6615,22 @@ index 40e3bf2..8eb8c39 100644
 +        }
 +    }
 +
-+    /** Returns the built-in subscription's id once its configs are replaced, or null after reporting why not. */
-+    private fun refreshDefaultSubscription(): String? {
-+        val subId = dataSource.ensureDefaultSubscription()
++    /**
++     * Makes sure both built-in sources exist (the second one shows up as its own tab), then
++     * downloads the subscription of [selectedGroupId], or of the main source when that group has
++     * no URL. Returns the id of the refreshed subscription once its configs are replaced, or null
++     * after reporting why not.
++     */
++    private fun refreshSubscription(selectedGroupId: String): String? {
++        val mainId = dataSource.ensureBuiltInSubscription(
++            AppConfig.CLICK2RAY_SUB_NAME, AppConfig.CLICK2RAY_SUB_URL
++        )
++        dataSource.ensureBuiltInSubscription(
++            AppConfig.CLICK2RAY_EXTRA_SUB_NAME, AppConfig.CLICK2RAY_EXTRA_SUB_URL
++        )
++        val selectedHasUrl = selectedGroupId.isNotEmpty() &&
++            dataSource.getSubscriptionItem(selectedGroupId)?.url?.isNotBlank() == true
++        val subId = if (selectedHasUrl) selectedGroupId else mainId
 +        val item = dataSource.getSubscriptionItem(subId)
 +        if (item == null) {
 +            toastError(R.string.toast_failure)
@@ -6651,7 +6672,7 @@ index 40e3bf2..8eb8c39 100644
      // ---------- Running state ----------
      private fun updateRunningState(running: Boolean, clearTestingText: Boolean = true) {
          if (!running || clearTestingText) testRequests.invalidateCurrent()
-@@ -946,6 +1056,7 @@ class MainViewModel(
+@@ -946,6 +1071,7 @@ class MainViewModel(
          selectedGroupLoadJob?.cancel()
          reloadJob?.cancel()
          filterJob?.cancel()
@@ -11858,7 +11879,7 @@ index b2252d5..ba9d0eb 100644
      <string name="app_tile_first_use">سی کرت ٱولی و کار بوردن ای ویژیی، ٱول ز من برنومه ی سرور ازاف کۊنین</string>
 diff --git a/V2rayNG/app/src/main/res/values-fa/click2ray_strings.xml b/V2rayNG/app/src/main/res/values-fa/click2ray_strings.xml
 new file mode 100644
-index 0000000..55bf701
+index 0000000..6d24a7e
 --- /dev/null
 +++ b/V2rayNG/app/src/main/res/values-fa/click2ray_strings.xml
 @@ -0,0 +1,21 @@
@@ -11874,7 +11895,7 @@ index 0000000..55bf701
 +    <string name="click2ray_update_done">انجام شد: %1$d کانفیگ سالم، %2$d کانفیگ خراب حذف شد. سریع‌ترین انتخاب شد.</string>
 +
 +    <string name="click2ray_terms_title">شرایط استفاده</string>
-+    <string name="click2ray_terms_body">Click2ray یک فهرست عمومی از کانفیگ‌ها را از sub.vlessfo.ru دریافت می‌کند. آن سایت فقط کانفیگ‌ها را جمع‌آوری می‌کند و مالک یا مدیر سرورها نیست. سرورها متعلق به اشخاص ثالث ناشناس‌اند و هیچ‌کس سرعت، دسترسی یا حریم خصوصی آن‌ها را تضمین نمی‌کند، پس برای کارهای بانکی یا ورود به حساب‌های حساس از آن‌ها استفاده نکن.\n\nطبق قوانین سایت، این سرویس نباید برای دسترسی به محتوایی که طبق قانون روسیه یا بلاروس ممنوع است استفاده شود و رعایت قانون کشوری که در آن زندگی می‌کنی با خودت است.</string>
++    <string name="click2ray_terms_body">Click2ray یک فهرست عمومی از کانفیگ‌ها را از sub.vlessfo.ru دریافت می‌کند. آن سایت فقط کانفیگ‌ها را جمع‌آوری می‌کند و مالک یا مدیر سرورها نیست. سرورها متعلق به اشخاص ثالث ناشناس‌اند و هیچ‌کس سرعت، دسترسی یا حریم خصوصی آن‌ها را تضمین نمی‌کند، پس برای کارهای بانکی یا ورود به حساب‌های حساس از آن‌ها استفاده نکن.\n\nClick2ray یک منبع دوم هم اضافه می‌کند: یک فهرست عمومی کانفیگ در GitHub (Epodonios). همین هشدار درباره‌ی آن هم صادق است.\n\nطبق قوانین سایت، این سرویس نباید برای دسترسی به محتوایی که طبق قانون روسیه یا بلاروس ممنوع است استفاده شود و رعایت قانون کشوری که در آن زندگی می‌کنی با خودت است.</string>
 +    <string name="click2ray_terms_read">خواندن متن کامل قوانین</string>
 +    <string name="click2ray_terms_accept_label">قوانین استفاده، پیشنهاد عمومی (Public Offer) و سیاست حریم خصوصی را خوانده‌ام و می‌پذیرم.</string>
 +    <string name="click2ray_terms_accept_button">قبول و ادامه</string>
@@ -11945,7 +11966,7 @@ index 3bb3f41..eae48fc 100644
      <string name="app_tile_first_use">首次使用此功能，請使用此應用程式新增伺服器</string>
 diff --git a/V2rayNG/app/src/main/res/values/click2ray_strings.xml b/V2rayNG/app/src/main/res/values/click2ray_strings.xml
 new file mode 100644
-index 0000000..cd8951c
+index 0000000..babf402
 --- /dev/null
 +++ b/V2rayNG/app/src/main/res/values/click2ray_strings.xml
 @@ -0,0 +1,23 @@
@@ -11962,7 +11983,7 @@ index 0000000..cd8951c
 +    <string name="click2ray_update_done" tools:ignore="MissingTranslation">Done: %1$d working, %2$d removed. The fastest one is selected.</string>
 +
 +    <string name="click2ray_terms_title" tools:ignore="MissingTranslation">Terms of use</string>
-+    <string name="click2ray_terms_body" tools:ignore="MissingTranslation">Click2ray downloads a public list of configurations from sub.vlessfo.ru. That site only collects configurations; it does not own or run the servers. The servers belong to unknown third parties, and nobody guarantees their speed, availability or privacy, so do not use them for banking or other sensitive logins.\n\nThe site\'s rules say the service must not be used to reach content that is banned by law in Russia or Belarus, and that you are responsible for obeying the law where you live.</string>
++    <string name="click2ray_terms_body" tools:ignore="MissingTranslation">Click2ray downloads a public list of configurations from sub.vlessfo.ru. That site only collects configurations; it does not own or run the servers. The servers belong to unknown third parties, and nobody guarantees their speed, availability or privacy, so do not use them for banking or other sensitive logins.\n\nClick2ray also adds a second source: a public configuration list on GitHub (Epodonios). The same warning applies to it.\n\nThe site\'s rules say the service must not be used to reach content that is banned by law in Russia or Belarus, and that you are responsible for obeying the law where you live.</string>
 +    <string name="click2ray_terms_read" tools:ignore="MissingTranslation">Read the full terms</string>
 +    <string name="click2ray_terms_accept_label" tools:ignore="MissingTranslation">I have read and accept the Terms of Use, Public Offer and Privacy Policy.</string>
 +    <string name="click2ray_terms_accept_button" tools:ignore="MissingTranslation">Accept and continue</string>
