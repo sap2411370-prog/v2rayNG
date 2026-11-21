@@ -1,0 +1,813 @@
+diff --git a/V2rayNG/app/build.gradle.kts b/V2rayNG/app/build.gradle.kts
+index 5c12c0f..1af4044 100644
+--- a/V2rayNG/app/build.gradle.kts
++++ b/V2rayNG/app/build.gradle.kts
+@@ -10,7 +10,7 @@ android {
+     compileSdk = 37
+ 
+     defaultConfig {
+-        applicationId = "com.v2ray.ang"
++        applicationId = "com.click2ray.app"
+         minSdk = 24
+         targetSdk = 37
+         versionCode = 760
+@@ -92,7 +92,7 @@ android {
+                 .map { it as com.android.build.gradle.internal.api.ApkVariantOutputImpl }
+                 .forEach { output ->
+                     val abi = output.getFilter("ABI") ?: "universal"
+-                    output.outputFileName = "v2rayNG_${variant.versionName}-fdroid_${abi}.apk"
++                    output.outputFileName = "Click2ray_${variant.versionName}-fdroid_${abi}.apk"
+                     if (versionCodes.containsKey(abi)) {
+                         output.versionCodeOverride =
+                             (100 * variant.versionCode + versionCodes[abi]!!).plus(5000000)
+@@ -112,7 +112,7 @@ android {
+                     else
+                         "universal"
+ 
+-                    output.outputFileName = "v2rayNG_${variant.versionName}_${abi}.apk"
++                    output.outputFileName = "Click2ray_${variant.versionName}_${abi}.apk"
+                     if (versionCodes.containsKey(abi)) {
+                         output.versionCodeOverride =
+                             (1000000 * versionCodes[abi]!!).plus(variant.versionCode)
+diff --git a/V2rayNG/app/src/main/java/com/v2ray/ang/AppConfig.kt b/V2rayNG/app/src/main/java/com/v2ray/ang/AppConfig.kt
+index e55b1d5..f6ead89 100644
+--- a/V2rayNG/app/src/main/java/com/v2ray/ang/AppConfig.kt
++++ b/V2rayNG/app/src/main/java/com/v2ray/ang/AppConfig.kt
+@@ -53,6 +53,12 @@ object AppConfig {
+     const val SUBSCRIPTION_MIN_INTERVAL_MINUTES = 15L
+     const val PREF_SPEED_ENABLED = "pref_speed_enabled"
+     const val PREF_CONFIRM_REMOVE = "pref_confirm_remove"
++
++    /** Click2ray: the one built-in subscription source and the consent that gates using it. */
++    const val CLICK2RAY_SUB_URL = "https://sub.vlessfo.ru/vlessforu/working_configs.txt"
++    const val CLICK2RAY_SUB_NAME = "Click2ray"
++    const val CLICK2RAY_TERMS_URL = "https://sub.vlessfo.ru/#terms"
++    const val PREF_CLICK2RAY_TERMS_ACCEPTED = "pref_click2ray_terms_accepted"
+     const val PREF_DOUBLE_COLUMN_DISPLAY = "pref_double_column_display"
+     const val PREF_GROUP_ALL_DISPLAY = "pref_group_all_display"
+     const val PREF_LANGUAGE = "pref_language"
+diff --git a/V2rayNG/app/src/main/java/com/v2ray/ang/ui/main/MainContract.kt b/V2rayNG/app/src/main/java/com/v2ray/ang/ui/main/MainContract.kt
+index 60cf607..f06a3ea 100644
+--- a/V2rayNG/app/src/main/java/com/v2ray/ang/ui/main/MainContract.kt
++++ b/V2rayNG/app/src/main/java/com/v2ray/ang/ui/main/MainContract.kt
+@@ -26,7 +26,9 @@ data class MainUiState(
+     val locateTarget: LocateTarget? = null,
+     val confirmRemove: Boolean = false,
+     val doubleColumnDisplay: Boolean = false,
+-    val shareQRCodeBitmap: android.graphics.Bitmap? = null
++    val shareQRCodeBitmap: android.graphics.Bitmap? = null,
++    /** Click2ray: the source site's terms were accepted, so the built-in subscription may be fetched. */
++    val termsAccepted: Boolean = false
+ )
+ 
+ /**
+@@ -45,6 +47,9 @@ sealed interface MainAction {
+     data object RemoveInvalidServers : MainAction
+     data object SortByTestResults : MainAction
+     data object UpdateSubscriptions : MainAction
++    /** Click2ray one-tap flow: download, replace, test, drop dead configs, sort, pick the fastest. */
++    data object UpdateAndTestAll : MainAction
++    data object AcceptTerms : MainAction
+     data class UpdateGroupSubscription(val groupId: String) : MainAction
+     data object ExportAll : MainAction
+ 
+diff --git a/V2rayNG/app/src/main/java/com/v2ray/ang/ui/main/MainDataSource.kt b/V2rayNG/app/src/main/java/com/v2ray/ang/ui/main/MainDataSource.kt
+index 595a344..a347aba 100644
+--- a/V2rayNG/app/src/main/java/com/v2ray/ang/ui/main/MainDataSource.kt
++++ b/V2rayNG/app/src/main/java/com/v2ray/ang/ui/main/MainDataSource.kt
+@@ -63,4 +63,14 @@ interface MainDataSource : Closeable {
+ 
+     fun syncSubscriptions()
+     fun initAssets()
++
++    /** Click2ray: whether the user has accepted the source site's terms on this device. */
++    fun isTermsAccepted(): Boolean
++    fun acceptTerms()
++
++    /**
++     * Click2ray: returns the id of the built-in subscription, creating it when it does not exist.
++     * Safe to call repeatedly and from several threads; it never creates a duplicate.
++     */
++    fun ensureDefaultSubscription(): String
+ }
+diff --git a/V2rayNG/app/src/main/java/com/v2ray/ang/ui/main/MainRepository.kt b/V2rayNG/app/src/main/java/com/v2ray/ang/ui/main/MainRepository.kt
+index fa37a47..8ab813f 100644
+--- a/V2rayNG/app/src/main/java/com/v2ray/ang/ui/main/MainRepository.kt
++++ b/V2rayNG/app/src/main/java/com/v2ray/ang/ui/main/MainRepository.kt
+@@ -232,4 +232,28 @@ class MainRepository(
+     override fun initAssets() {
+         SettingsManager.initAssets(app, app.assets)
+     }
++
++    override fun isTermsAccepted(): Boolean =
++        MmkvManager.decodeSettingsBool(AppConfig.PREF_CLICK2RAY_TERMS_ACCEPTED, false)
++
++    override fun acceptTerms() {
++        MmkvManager.encodeSettings(AppConfig.PREF_CLICK2RAY_TERMS_ACCEPTED, true)
++    }
++
++    @Synchronized
++    override fun ensureDefaultSubscription(): String {
++        MmkvManager.decodeSubscriptions()
++            .firstOrNull { it.subscription.url == AppConfig.CLICK2RAY_SUB_URL }
++            ?.let { return it.guid }
++
++        val guid = Utils.getUuid()
++        MmkvManager.encodeSubscription(
++            guid,
++            SubscriptionItem(
++                remarks = AppConfig.CLICK2RAY_SUB_NAME,
++                url = AppConfig.CLICK2RAY_SUB_URL,
++            )
++        )
++        return guid
++    }
+ }
+diff --git a/V2rayNG/app/src/main/java/com/v2ray/ang/ui/main/MainScreen.kt b/V2rayNG/app/src/main/java/com/v2ray/ang/ui/main/MainScreen.kt
+index fac8660..3db916b 100644
+--- a/V2rayNG/app/src/main/java/com/v2ray/ang/ui/main/MainScreen.kt
++++ b/V2rayNG/app/src/main/java/com/v2ray/ang/ui/main/MainScreen.kt
+@@ -35,6 +35,7 @@ import androidx.compose.ui.platform.LocalDensity
+ import androidx.compose.ui.platform.LocalLayoutDirection
+ import androidx.compose.ui.unit.dp
+ import androidx.lifecycle.compose.collectAsStateWithLifecycle
++import com.v2ray.ang.AppConfig
+ import com.v2ray.ang.dto.entities.ProfileItem
+ import com.v2ray.ang.ui.compose.LocalDarkTheme
+ import com.v2ray.ang.ui.compose.QRCodeDialog
+@@ -56,6 +57,20 @@ fun MainScreen(
+     val doubleColumnDisplay = uiState.doubleColumnDisplay
+     val confirmRemove = uiState.confirmRemove
+     val shareQRCodeBitmap = uiState.shareQRCodeBitmap
++    val termsAccepted = uiState.termsAccepted
++
++    // Click2ray: the terms dialog opens by itself on first launch, and again when the user taps
++    // the update button without having accepted. "Not now" only closes it; nothing is downloaded.
++    var showTerms by rememberSaveable { mutableStateOf(!termsAccepted) }
++    var updateAfterTerms by rememberSaveable { mutableStateOf(false) }
++    val onUpdateAndTest: () -> Unit = {
++        if (termsAccepted) {
++            onAction(MainAction.UpdateAndTestAll)
++        } else {
++            updateAfterTerms = true
++            showTerms = true
++        }
++    }
+ 
+     val isDarkTheme = LocalDarkTheme.current
+     val drawerState = rememberDrawerState(DrawerValue.Closed)
+@@ -131,6 +146,22 @@ fun MainScreen(
+         onConfirmRemove = { guid -> showRemoveConfirm = null; onAction(MainAction.RemoveServer(guid)) }
+     )
+ 
++    if (showTerms && !termsAccepted) {
++        Click2rayTermsDialog(
++            onAccept = {
++                showTerms = false
++                onAction(MainAction.AcceptTerms)
++                if (updateAfterTerms) onAction(MainAction.UpdateAndTestAll)
++                updateAfterTerms = false
++            },
++            onDismiss = {
++                showTerms = false
++                updateAfterTerms = false
++            },
++            onOpenTerms = { onAction(MainAction.OpenSubscriptionLink(AppConfig.CLICK2RAY_TERMS_URL)) },
++        )
++    }
++
+     if (shareTarget != null) {
+         val (guid, profile, more) = shareTarget!!
+         ShareMethodDialog(
+@@ -199,7 +230,6 @@ fun MainScreen(
+             val bottomBarHeight = with(LocalDensity.current) { bottomBarHeightPx.toDp() }
+ 
+             Box(Modifier.fillMaxSize()) {
+-            if (groups.isNotEmpty()) {
+                 Column(
+                     modifier = Modifier
+                         .fillMaxSize()
+@@ -210,6 +240,14 @@ fun MainScreen(
+                             end = innerPadding.calculateEndPadding(layoutDirection)
+                         )
+                 ) {
++                    MainUpdateBar(
++                        isLoading = isLoading,
++                        isTesting = uiState.isTesting,
++                        onUpdateAndTest = onUpdateAndTest,
++                        onCancelTesting = { onAction(MainAction.CancelTesting) },
++                        onTestAll = { onAction(MainAction.TestRealAllServers) },
++                    )
++                    if (groups.isNotEmpty()) {
+                     if (groups.size > 1) {
+                         GroupTabBar(
+                             groups = groups,
+@@ -228,7 +266,7 @@ fun MainScreen(
+ 
+                     HorizontalPager(
+                         state = pagerState,
+-                        modifier = Modifier.fillMaxSize(),
++                        modifier = Modifier.weight(1f),
+                         userScrollEnabled = true,
+                         beyondViewportPageCount = 1,
+                         key = { page -> groups.getOrNull(page)?.id ?: "group-page-$page" }
+@@ -264,8 +302,8 @@ fun MainScreen(
+                             )
+                         )
+                     }
++                    } // if (groups.isNotEmpty())
+                 }
+-            }
+             MainBottomBar(
+                 displayText = displayText,
+                 isRunning = isRunning,
+diff --git a/V2rayNG/app/src/main/java/com/v2ray/ang/ui/main/MainUpdateBar.kt b/V2rayNG/app/src/main/java/com/v2ray/ang/ui/main/MainUpdateBar.kt
+new file mode 100644
+index 0000000..569d8bd
+--- /dev/null
++++ b/V2rayNG/app/src/main/java/com/v2ray/ang/ui/main/MainUpdateBar.kt
+@@ -0,0 +1,172 @@
++package com.v2ray.ang.ui.main
++
++import androidx.compose.foundation.layout.Arrangement
++import androidx.compose.foundation.layout.Column
++import androidx.compose.foundation.layout.Row
++import androidx.compose.foundation.layout.Spacer
++import androidx.compose.foundation.layout.fillMaxWidth
++import androidx.compose.foundation.layout.heightIn
++import androidx.compose.foundation.layout.padding
++import androidx.compose.foundation.layout.size
++import androidx.compose.foundation.layout.width
++import androidx.compose.foundation.rememberScrollState
++import androidx.compose.foundation.selection.toggleable
++import androidx.compose.foundation.verticalScroll
++import androidx.compose.material3.AlertDialog
++import androidx.compose.material3.Button
++import androidx.compose.material3.ButtonDefaults
++import androidx.compose.material3.Checkbox
++import androidx.compose.material3.CircularProgressIndicator
++import androidx.compose.material3.Icon
++import androidx.compose.material3.LocalContentColor
++import androidx.compose.material3.MaterialTheme
++import androidx.compose.material3.OutlinedButton
++import androidx.compose.material3.Text
++import androidx.compose.material3.TextButton
++import androidx.compose.runtime.Composable
++import androidx.compose.runtime.getValue
++import androidx.compose.runtime.mutableStateOf
++import androidx.compose.runtime.saveable.rememberSaveable
++import androidx.compose.runtime.setValue
++import androidx.compose.ui.Alignment
++import androidx.compose.ui.Modifier
++import androidx.compose.ui.res.painterResource
++import androidx.compose.ui.res.stringResource
++import androidx.compose.ui.semantics.Role
++import androidx.compose.ui.unit.dp
++import com.v2ray.ang.R
++
++/**
++ * Click2ray: the big one-tap button (download, replace, test, clean up) and a plain "test" button.
++ *
++ * While a test runs the main button turns into "Cancel". While the download runs it is disabled
++ * and shows a spinner, because that step cannot be cancelled.
++ */
++@Composable
++fun MainUpdateBar(
++    isLoading: Boolean,
++    isTesting: Boolean,
++    onUpdateAndTest: () -> Unit,
++    onCancelTesting: () -> Unit,
++    onTestAll: () -> Unit,
++    modifier: Modifier = Modifier,
++) {
++    Row(
++        modifier = modifier
++            .fillMaxWidth()
++            .padding(horizontal = 12.dp, vertical = 8.dp),
++        horizontalArrangement = Arrangement.spacedBy(8.dp),
++        verticalAlignment = Alignment.CenterVertically,
++    ) {
++        if (isTesting) {
++            Button(
++                onClick = onCancelTesting,
++                modifier = Modifier
++                    .weight(1f)
++                    .heightIn(min = 52.dp),
++                colors = ButtonDefaults.buttonColors(
++                    containerColor = MaterialTheme.colorScheme.errorContainer,
++                    contentColor = MaterialTheme.colorScheme.onErrorContainer,
++                ),
++            ) {
++                CircularProgressIndicator(
++                    modifier = Modifier.size(18.dp),
++                    strokeWidth = 2.dp,
++                    color = LocalContentColor.current,
++                )
++                Spacer(Modifier.width(8.dp))
++                Text(stringResource(R.string.click2ray_cancel_test))
++            }
++        } else {
++            Button(
++                onClick = onUpdateAndTest,
++                enabled = !isLoading,
++                modifier = Modifier
++                    .weight(1f)
++                    .heightIn(min = 52.dp),
++            ) {
++                if (isLoading) {
++                    CircularProgressIndicator(
++                        modifier = Modifier.size(18.dp),
++                        strokeWidth = 2.dp,
++                        color = LocalContentColor.current,
++                    )
++                } else {
++                    Icon(painterResource(R.drawable.ic_refresh_24dp), contentDescription = null)
++                }
++                Spacer(Modifier.width(8.dp))
++                Text(
++                    stringResource(
++                        if (isLoading) R.string.click2ray_updating else R.string.click2ray_update_and_test
++                    )
++                )
++            }
++            OutlinedButton(
++                onClick = onTestAll,
++                enabled = !isLoading,
++                modifier = Modifier.heightIn(min = 52.dp),
++            ) {
++                Text(stringResource(R.string.click2ray_test_all))
++            }
++        }
++    }
++}
++
++/**
++ * Click2ray: asks the user to read and accept the source site's terms before anything is
++ * downloaded. The site treats ticking the box and copying the link as acceptance, so the
++ * accept button stays disabled until the user ticks the box themselves.
++ */
++@Composable
++fun Click2rayTermsDialog(
++    onAccept: () -> Unit,
++    onDismiss: () -> Unit,
++    onOpenTerms: () -> Unit,
++) {
++    var checked by rememberSaveable { mutableStateOf(false) }
++    AlertDialog(
++        onDismissRequest = onDismiss,
++        title = { Text(stringResource(R.string.click2ray_terms_title)) },
++        text = {
++            Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
++                Text(
++                    text = stringResource(R.string.click2ray_terms_body),
++                    style = MaterialTheme.typography.bodyMedium,
++                )
++                TextButton(onClick = onOpenTerms) {
++                    Text(stringResource(R.string.click2ray_terms_read))
++                }
++                // One focusable node for the whole row, so the checkbox and its label are not
++                // two separate targets for TalkBack or the D-pad.
++                Row(
++                    modifier = Modifier
++                        .fillMaxWidth()
++                        .toggleable(
++                            value = checked,
++                            role = Role.Checkbox,
++                            onValueChange = { checked = it },
++                        )
++                        .padding(vertical = 8.dp),
++                    verticalAlignment = Alignment.CenterVertically,
++                ) {
++                    Checkbox(checked = checked, onCheckedChange = null)
++                    Spacer(Modifier.width(8.dp))
++                    Text(
++                        text = stringResource(R.string.click2ray_terms_accept_label),
++                        style = MaterialTheme.typography.bodyMedium,
++                    )
++                }
++            }
++        },
++        confirmButton = {
++            TextButton(onClick = onAccept, enabled = checked) {
++                Text(stringResource(R.string.click2ray_terms_accept_button))
++            }
++        },
++        dismissButton = {
++            TextButton(onClick = onDismiss) {
++                Text(stringResource(R.string.click2ray_terms_not_now))
++            }
++        },
++    )
++}
+diff --git a/V2rayNG/app/src/main/java/com/v2ray/ang/ui/main/MainViewModel.kt b/V2rayNG/app/src/main/java/com/v2ray/ang/ui/main/MainViewModel.kt
+index 40e3bf2..8eb8c39 100644
+--- a/V2rayNG/app/src/main/java/com/v2ray/ang/ui/main/MainViewModel.kt
++++ b/V2rayNG/app/src/main/java/com/v2ray/ang/ui/main/MainViewModel.kt
+@@ -82,7 +82,8 @@ class MainViewModel(
+             selectedGroupId = dataSource.getSelectedSubscriptionId(),
+             selectedGuid = dataSource.getSelectServer(),
+             confirmRemove = dataSource.getConfirmRemove(),
+-            doubleColumnDisplay = dataSource.getDoubleColumnDisplay()
++            doubleColumnDisplay = dataSource.getDoubleColumnDisplay(),
++            termsAccepted = dataSource.isTermsAccepted()
+         )
+     )
+     val uiState: StateFlow<MainUiState> = _uiState.asStateFlow()
+@@ -110,6 +111,11 @@ class MainViewModel(
+     private val testRequests = MainTestRequests()
+     private var bulkTestJob: Job? = null
+ 
++    // Click2ray one-tap flow. The id is set only while a test started by that flow is running; the
++    // flow's cleanup (drop dead configs, sort, pick the fastest) runs when that test finishes.
++    private var oneTapJob: Job? = null
++    private var pendingCleanupSubId: String? = null
++
+     private val initialPageReady = CompletableDeferred<Unit>()
+ 
+     // ---------- Service events ----------
+@@ -178,6 +184,7 @@ class MainViewModel(
+ 
+             is MainServiceEvent.MeasureConfigCancelled -> {
+                 if (testRequests.completeBulk(event.requestId) != null) {
++                    pendingCleanupSubId = null
+                     cancelPendingTestResults()
+                     resetTestStatus()
+                 }
+@@ -285,6 +292,8 @@ class MainViewModel(
+             MainAction.RemoveInvalidServers -> removeInvalidServerAsync()
+             MainAction.SortByTestResults -> sortByTestResultsAsync()
+             MainAction.UpdateSubscriptions -> importConfigViaSub(uiState.value.selectedGroupId)
++            MainAction.UpdateAndTestAll -> updateAndTestAll()
++            MainAction.AcceptTerms -> acceptTerms()
+             is MainAction.UpdateGroupSubscription -> importConfigViaSub(action.groupId)
+             MainAction.ExportAll -> exportAllAsync()
+             is MainAction.SelectGroup -> subscriptionIdChanged(action.groupId)
+@@ -816,6 +825,7 @@ class MainViewModel(
+ 
+     // ---------- Testing ----------
+     fun cancelAllPing() {
++        pendingCleanupSubId = null
+         bulkTestJob?.cancel()
+         bulkTestJob = null
+         testRequests.cancelBulk()
+@@ -900,7 +910,10 @@ class MainViewModel(
+     private fun onTestsFinished(requestId: String) {
+         if (testRequests.completeBulk(requestId) == null) return
+         resetTestStatus()
++        val cleanupSubId = pendingCleanupSubId
++        pendingCleanupSubId = null
+         viewModelScope.launch(ioDispatcher) {
++            if (cleanupSubId != null) finishUpdateAndTest(cleanupSubId)
+             cacheMutex.withLock { groupDataCache.clear() }
+             reloadAllGroups(_uiState.value.groups.map { it.id })
+         }
+@@ -927,6 +940,103 @@ class MainViewModel(
+         _uiState.update { it.copy(locateTarget = null) }
+     }
+ 
++    // ---------- Click2ray one-tap flow ----------
++    private fun acceptTerms() {
++        // State first, so an action sent right after this one already sees the consent.
++        _uiState.update { it.copy(termsAccepted = true) }
++        viewModelScope.launch(ioDispatcher) {
++            try {
++                dataSource.acceptTerms()
++            } catch (cancelled: CancellationException) {
++                throw cancelled
++            } catch (e: Exception) {
++                LogUtil.e(AppConfig.TAG, "Failed to persist terms acceptance", e)
++            }
++        }
++    }
++
++    /**
++     * Download the built-in subscription (replacing its configs), select it, and start a real-delay
++     * test of every config in it. [finishUpdateAndTest] completes the flow when the test is done.
++     */
++    private fun updateAndTestAll() {
++        val state = uiState.value
++        if (!state.termsAccepted) return
++        if (oneTapJob?.isActive == true || state.isTesting) return
++        if (state.isRunning) {
++            // A test through the active tunnel would measure the tunnel, not the configs.
++            toastError(R.string.click2ray_stop_connection_first)
++            return
++        }
++        oneTapJob = viewModelScope.launch {
++            _isLoading.value = true
++            try {
++                val subId = withContext(ioDispatcher) { refreshDefaultSubscription() }
++                    ?: return@launch
++                dataSource.setSelectedSubscriptionId(subId)
++                _uiState.update { it.copy(selectedGroupId = subId) }
++                setupGroupTab(forceRefresh = true).join()
++                refreshSelectedGuid()
++
++                // Still on the main thread, which owns the test request bookkeeping.
++                testAllRealPing(onlyTcp = false)
++                if (testRequests.isTesting) {
++                    pendingCleanupSubId = subId
++                } else {
++                    toastError(R.string.click2ray_update_failed)
++                }
++            } catch (cancelled: CancellationException) {
++                throw cancelled
++            } catch (e: Exception) {
++                LogUtil.e(AppConfig.TAG, "Update and test failed", e)
++                toastError(R.string.toast_failure)
++            } finally {
++                _isLoading.value = false
++            }
++        }
++    }
++
++    /** Returns the built-in subscription's id once its configs are replaced, or null after reporting why not. */
++    private fun refreshDefaultSubscription(): String? {
++        val subId = dataSource.ensureDefaultSubscription()
++        val item = dataSource.getSubscriptionItem(subId)
++        if (item == null) {
++            toastError(R.string.toast_failure)
++            return null
++        }
++        val result = dataSource.updateConfigViaSub(SubscriptionCache(subId, item))
++        if (result.configCount <= 0) {
++            toastError(R.string.click2ray_update_failed)
++            return null
++        }
++        return subId
++    }
++
++    /** After the test: drop configs that failed, sort the rest by delay, select the fastest. */
++    private fun finishUpdateAndTest(subId: String) {
++        try {
++            val working = dataSource.getServerGuidList(subId).count { guid ->
++                (dataSource.decodeAffiliationInfo(guid)?.testDelayMillis ?: 0L) > 0L
++            }
++            if (working == 0) {
++                // Keep everything: a bad connection is a likelier cause than a fully dead list.
++                toastError(R.string.click2ray_no_working_configs)
++                return
++            }
++            val removed = dataSource.removeInvalidServersInGroup(subId)
++            dataSource.sortByTestResultsForSub(subId)
++            if (!uiState.value.isRunning) {
++                dataSource.getServerGuidList(subId).firstOrNull()?.let { updateSelectedGuid(it) }
++            }
++            toast(dataSource.getString(R.string.click2ray_update_done, working, removed))
++        } catch (cancelled: CancellationException) {
++            throw cancelled
++        } catch (e: Exception) {
++            LogUtil.e(AppConfig.TAG, "Cleanup after test failed", e)
++            toastError(R.string.toast_failure)
++        }
++    }
++
+     // ---------- Running state ----------
+     private fun updateRunningState(running: Boolean, clearTestingText: Boolean = true) {
+         if (!running || clearTestingText) testRequests.invalidateCurrent()
+@@ -946,6 +1056,7 @@ class MainViewModel(
+         selectedGroupLoadJob?.cancel()
+         reloadJob?.cancel()
+         filterJob?.cancel()
++        oneTapJob?.cancel()
+         cancelAllPing()
+         dataSource.close()
+         super.onCleared()
+diff --git a/V2rayNG/app/src/main/java/com/v2ray/ang/util/Utils.kt b/V2rayNG/app/src/main/java/com/v2ray/ang/util/Utils.kt
+index 1f4c4d3..ca3892b 100644
+--- a/V2rayNG/app/src/main/java/com/v2ray/ang/util/Utils.kt
++++ b/V2rayNG/app/src/main/java/com/v2ray/ang/util/Utils.kt
+@@ -456,9 +456,13 @@ object Utils {
+     /**
+      * Check if the package is Xray.
+      *
+-     * @return True if the package is Xray, false otherwise.
++     * Click2ray always ships the Xray core, but its applicationId no longer starts with
++     * "com.v2ray.ang", so the old prefix check would wrongly select the v2fly code paths.
++     * Remove this override only if a v2fly build of Click2ray is ever added.
++     *
++     * @return True, always.
+      */
+-    fun isXray(): Boolean = BuildConfig.APPLICATION_ID.startsWith("com.v2ray.ang")
++    fun isXray(): Boolean = true
+ 
+     /**
+      * Check if an IPv4 address is within an IPv4 CIDR range
+diff --git a/V2rayNG/app/src/main/res/values-ar/strings.xml b/V2rayNG/app/src/main/res/values-ar/strings.xml
+index 24c6d12..0f17afc 100644
+--- a/V2rayNG/app/src/main/res/values-ar/strings.xml
++++ b/V2rayNG/app/src/main/res/values-ar/strings.xml
+@@ -1,6 +1,6 @@
+ <?xml version="1.0" encoding="utf-8"?>
+ <resources>
+-    <string name="app_name" translatable="false">v2rayNG</string>
++    <string name="app_name" translatable="false">Click2ray</string>
+     <string name="app_widget_name">التبديل</string>
+     <string name="app_tile_name">التبديل</string>
+     <string name="app_tile_first_use">أول استخدام لهذه الميزة، يرجى استخدام التطبيق لإضافة خادم</string>
+diff --git a/V2rayNG/app/src/main/res/values-az/strings.xml b/V2rayNG/app/src/main/res/values-az/strings.xml
+index 953a133..1c9ac74 100644
+--- a/V2rayNG/app/src/main/res/values-az/strings.xml
++++ b/V2rayNG/app/src/main/res/values-az/strings.xml
+@@ -1,6 +1,6 @@
+ <?xml version="1.0" encoding="utf-8"?>
+ <resources>
+-    <string name="app_name" translatable="false">v2rayNG</string>
++    <string name="app_name" translatable="false">Click2ray</string>
+     <string name="app_widget_name">Keçid</string>
+     <string name="app_tile_name">Keçid</string>
+     <string name="app_tile_first_use">Bu funksiyanı istifadə etməzdən əvvəl tətbiqə profil əlavə edin.</string>
+diff --git a/V2rayNG/app/src/main/res/values-bn/strings.xml b/V2rayNG/app/src/main/res/values-bn/strings.xml
+index 83ddd2e..b4d27c1 100644
+--- a/V2rayNG/app/src/main/res/values-bn/strings.xml
++++ b/V2rayNG/app/src/main/res/values-bn/strings.xml
+@@ -1,6 +1,6 @@
+ <?xml version="1.0" encoding="utf-8"?>
+ <resources>
+-    <string name="app_name" translatable="false">v2rayNG</string>
++    <string name="app_name" translatable="false">Click2ray</string>
+     <string name="app_widget_name">সুইচ</string>
+     <string name="app_tile_name">সুইচ</string>
+     <string name="app_tile_first_use">এই ফিচারটি প্রথম ব্যবহার করা হচ্ছে, সার্ভার যোগ করতে অ্যাপটি ব্যবহার করুন</string>
+diff --git a/V2rayNG/app/src/main/res/values-bqi-rIR/strings.xml b/V2rayNG/app/src/main/res/values-bqi-rIR/strings.xml
+index b2252d5..ba9d0eb 100644
+--- a/V2rayNG/app/src/main/res/values-bqi-rIR/strings.xml
++++ b/V2rayNG/app/src/main/res/values-bqi-rIR/strings.xml
+@@ -1,6 +1,6 @@
+ <?xml version="1.0" encoding="utf-8"?>
+ <resources>
+-    <string name="app_name" translatable="false">v2rayNG</string>
++    <string name="app_name" translatable="false">Click2ray</string>
+     <string name="app_widget_name">آلشت</string>
+     <string name="app_tile_name">آلشت</string>
+     <string name="app_tile_first_use">سی کرت ٱولی و کار بوردن ای ویژیی، ٱول ز من برنومه ی سرور ازاف کۊنین</string>
+diff --git a/V2rayNG/app/src/main/res/values-fa/click2ray_strings.xml b/V2rayNG/app/src/main/res/values-fa/click2ray_strings.xml
+new file mode 100644
+index 0000000..2e30592
+--- /dev/null
++++ b/V2rayNG/app/src/main/res/values-fa/click2ray_strings.xml
+@@ -0,0 +1,18 @@
++<?xml version="1.0" encoding="utf-8"?>
++<resources>
++    <string name="click2ray_update_and_test">بروزرسانی و تست کانفیگ‌ها</string>
++    <string name="click2ray_updating">در حال بروزرسانی…</string>
++    <string name="click2ray_test_all">تست</string>
++    <string name="click2ray_cancel_test">لغو تست</string>
++    <string name="click2ray_stop_connection_first">اول اتصال را قطع کن، بعد بروزرسانی کن. تست از داخل اتصال فعال نتیجه‌ی درست نمی‌دهد.</string>
++    <string name="click2ray_update_failed">دریافت کانفیگ‌ها انجام نشد. اینترنت را بررسی کن و دوباره تلاش کن.</string>
++    <string name="click2ray_no_working_configs">هیچ کانفیگی تست را رد نکرد، برای همین چیزی حذف نشد. اینترنت را بررسی کن و دوباره تلاش کن.</string>
++    <string name="click2ray_update_done">انجام شد: %1$d کانفیگ سالم، %2$d کانفیگ خراب حذف شد. سریع‌ترین انتخاب شد.</string>
++
++    <string name="click2ray_terms_title">شرایط استفاده</string>
++    <string name="click2ray_terms_body">Click2ray یک فهرست عمومی از کانفیگ‌ها را از sub.vlessfo.ru دریافت می‌کند. آن سایت فقط کانفیگ‌ها را جمع‌آوری می‌کند و مالک یا مدیر سرورها نیست. سرورها متعلق به اشخاص ثالث ناشناس‌اند و هیچ‌کس سرعت، دسترسی یا حریم خصوصی آن‌ها را تضمین نمی‌کند، پس برای کارهای بانکی یا ورود به حساب‌های حساس از آن‌ها استفاده نکن.\n\nطبق قوانین سایت، این سرویس نباید برای دسترسی به محتوایی که طبق قانون روسیه یا بلاروس ممنوع است استفاده شود و رعایت قانون کشوری که در آن زندگی می‌کنی با خودت است.</string>
++    <string name="click2ray_terms_read">خواندن متن کامل قوانین</string>
++    <string name="click2ray_terms_accept_label">قوانین استفاده، پیشنهاد عمومی (Public Offer) و سیاست حریم خصوصی را خوانده‌ام و می‌پذیرم.</string>
++    <string name="click2ray_terms_accept_button">قبول و ادامه</string>
++    <string name="click2ray_terms_not_now">فعلاً نه</string>
++</resources>
+diff --git a/V2rayNG/app/src/main/res/values-fa/strings.xml b/V2rayNG/app/src/main/res/values-fa/strings.xml
+index dce046e..76f54bc 100644
+--- a/V2rayNG/app/src/main/res/values-fa/strings.xml
++++ b/V2rayNG/app/src/main/res/values-fa/strings.xml
+@@ -1,6 +1,6 @@
+ <?xml version="1.0" encoding="utf-8"?>
+ <resources>
+-    <string name="app_name" translatable="false">v2rayNG</string>
++    <string name="app_name" translatable="false">Click2ray</string>
+     <string name="app_widget_name">تعویض</string>
+     <string name="app_tile_name">تعویض</string>
+     <string name="app_tile_first_use">برای اولین استفاده از این قابلیت، لطفاً ابتدا از داخل برنامه یک سرور اضافه کنید</string>
+diff --git a/V2rayNG/app/src/main/res/values-ru/strings.xml b/V2rayNG/app/src/main/res/values-ru/strings.xml
+index ffe31f0..52a016e 100644
+--- a/V2rayNG/app/src/main/res/values-ru/strings.xml
++++ b/V2rayNG/app/src/main/res/values-ru/strings.xml
+@@ -1,6 +1,6 @@
+ <?xml version="1.0" encoding="utf-8"?>
+ <resources>
+-    <string name="app_name" translatable="false">v2rayNG</string>
++    <string name="app_name" translatable="false">Click2ray</string>
+     <string name="app_widget_name">v2rayNG</string>
+     <string name="app_tile_name">v2rayNG</string>
+     <string name="app_tile_first_use">Добавьте профиль в приложении перед использованием этой функции.</string>
+diff --git a/V2rayNG/app/src/main/res/values-vi/strings.xml b/V2rayNG/app/src/main/res/values-vi/strings.xml
+index 1f88e68..8b0d036 100644
+--- a/V2rayNG/app/src/main/res/values-vi/strings.xml
++++ b/V2rayNG/app/src/main/res/values-vi/strings.xml
+@@ -1,6 +1,6 @@
+ <?xml version="1.0" encoding="utf-8"?>
+ <resources>
+-    <string name="app_name" translatable="false">v2rayNG</string>
++    <string name="app_name" translatable="false">Click2ray</string>
+     <string name="app_widget_name">Kết nối ngay</string>
+     <string name="app_tile_name">Kết nối ngay</string>
+     <string name="app_tile_first_use">Vui lòng thêm một cấu hình vào v2rayNG để sử dụng!</string>
+diff --git a/V2rayNG/app/src/main/res/values-zh-rCN/strings.xml b/V2rayNG/app/src/main/res/values-zh-rCN/strings.xml
+index 19d20a0..cbb2fa0 100644
+--- a/V2rayNG/app/src/main/res/values-zh-rCN/strings.xml
++++ b/V2rayNG/app/src/main/res/values-zh-rCN/strings.xml
+@@ -1,6 +1,6 @@
+ <?xml version="1.0" encoding="utf-8"?>
+ <resources>
+-    <string name="app_name" translatable="false">v2rayNG</string>
++    <string name="app_name" translatable="false">Click2ray</string>
+     <string name="app_widget_name">开关</string>
+     <string name="app_tile_name">开关</string>
+     <string name="app_tile_first_use">初次使用此功能请先用 APP 添加配置</string>
+diff --git a/V2rayNG/app/src/main/res/values-zh-rTW/strings.xml b/V2rayNG/app/src/main/res/values-zh-rTW/strings.xml
+index 3bb3f41..eae48fc 100644
+--- a/V2rayNG/app/src/main/res/values-zh-rTW/strings.xml
++++ b/V2rayNG/app/src/main/res/values-zh-rTW/strings.xml
+@@ -1,6 +1,6 @@
+ <?xml version="1.0" encoding="utf-8"?>
+ <resources>
+-    <string name="app_name" translatable="false">v2rayNG</string>
++    <string name="app_name" translatable="false">Click2ray</string>
+     <string name="app_widget_name">開關</string>
+     <string name="app_tile_name">開關</string>
+     <string name="app_tile_first_use">首次使用此功能，請使用此應用程式新增伺服器</string>
+diff --git a/V2rayNG/app/src/main/res/values/click2ray_strings.xml b/V2rayNG/app/src/main/res/values/click2ray_strings.xml
+new file mode 100644
+index 0000000..f8039d6
+--- /dev/null
++++ b/V2rayNG/app/src/main/res/values/click2ray_strings.xml
+@@ -0,0 +1,19 @@
++<?xml version="1.0" encoding="utf-8"?>
++<!-- Click2ray strings. Only English and Persian are translated; other locales fall back to English. -->
++<resources xmlns:tools="http://schemas.android.com/tools">
++    <string name="click2ray_update_and_test" tools:ignore="MissingTranslation">Update and test configs</string>
++    <string name="click2ray_updating" tools:ignore="MissingTranslation">Updating…</string>
++    <string name="click2ray_test_all" tools:ignore="MissingTranslation">Test</string>
++    <string name="click2ray_cancel_test" tools:ignore="MissingTranslation">Cancel test</string>
++    <string name="click2ray_stop_connection_first" tools:ignore="MissingTranslation">Disconnect first, then update. A test through an active connection gives wrong results.</string>
++    <string name="click2ray_update_failed" tools:ignore="MissingTranslation">Could not download the configs. Check your internet connection and try again.</string>
++    <string name="click2ray_no_working_configs" tools:ignore="MissingTranslation">No config passed the test, so nothing was removed. Check your internet connection and try again.</string>
++    <string name="click2ray_update_done" tools:ignore="MissingTranslation">Done: %1$d working, %2$d removed. The fastest one is selected.</string>
++
++    <string name="click2ray_terms_title" tools:ignore="MissingTranslation">Terms of use</string>
++    <string name="click2ray_terms_body" tools:ignore="MissingTranslation">Click2ray downloads a public list of configurations from sub.vlessfo.ru. That site only collects configurations; it does not own or run the servers. The servers belong to unknown third parties, and nobody guarantees their speed, availability or privacy, so do not use them for banking or other sensitive logins.\n\nThe site\'s rules say the service must not be used to reach content that is banned by law in Russia or Belarus, and that you are responsible for obeying the law where you live.</string>
++    <string name="click2ray_terms_read" tools:ignore="MissingTranslation">Read the full terms</string>
++    <string name="click2ray_terms_accept_label" tools:ignore="MissingTranslation">I have read and accept the Terms of Use, Public Offer and Privacy Policy.</string>
++    <string name="click2ray_terms_accept_button" tools:ignore="MissingTranslation">Accept and continue</string>
++    <string name="click2ray_terms_not_now" tools:ignore="MissingTranslation">Not now</string>
++</resources>
+diff --git a/V2rayNG/app/src/main/res/values/strings.xml b/V2rayNG/app/src/main/res/values/strings.xml
+index 99e8afd..ba11679 100644
+--- a/V2rayNG/app/src/main/res/values/strings.xml
++++ b/V2rayNG/app/src/main/res/values/strings.xml
+@@ -1,6 +1,6 @@
+ <?xml version="1.0" encoding="utf-8"?>
+ <resources>
+-    <string name="app_name" translatable="false">v2rayNG</string>
++    <string name="app_name" translatable="false">Click2ray</string>
+     <string name="app_widget_name">Switch</string>
+     <string name="app_tile_name">Switch</string>
+     <string name="app_tile_first_use">Add a profile in the app before using this feature.</string>
+@@ -14,7 +14,7 @@
+     <string name="pull_down_to_refresh">Please pull down to refresh!</string>
+ 
+     <!-- Notifications -->
+-    <string name="notification_channel_service">v2rayNG service</string>
++    <string name="notification_channel_service">Click2ray service</string>
+     <string name="notification_channel_subscription_updates">Subscription updates</string>
+     <string name="notification_channel_connection_checks">Connection checks</string>
+     <string name="notification_action_stop_v2ray">Stop</string>
+diff --git a/V2rayNG/app/src/main/res/xml/shortcuts.xml b/V2rayNG/app/src/main/res/xml/shortcuts.xml
+index c7cb004..f6538bd 100644
+--- a/V2rayNG/app/src/main/res/xml/shortcuts.xml
++++ b/V2rayNG/app/src/main/res/xml/shortcuts.xml
+@@ -11,7 +11,7 @@
+         <intent
+             android:action="android.intent.action.VIEW"
+             android:targetClass="com.v2ray.ang.ui.shortcut.ScSwitchActivity"
+-            android:targetPackage="com.v2ray.ang" />
++            android:targetPackage="com.click2ray.app" />
+         <categories android:name="android.shortcut.conversation" />
+     </shortcut>
+     <shortcut
+@@ -25,7 +25,7 @@
+         <intent
+             android:action="android.intent.action.VIEW"
+             android:targetClass="com.v2ray.ang.ui.shortcut.ScScannerActivity"
+-            android:targetPackage="com.v2ray.ang" />
++            android:targetPackage="com.click2ray.app" />
+         <categories android:name="android.shortcut.conversation" />
+     </shortcut>
+     <shortcut
+@@ -39,7 +39,7 @@
+         <intent
+             android:action="android.intent.action.VIEW"
+             android:targetClass="com.v2ray.ang.ui.shortcut.ScStartActivity"
+-            android:targetPackage="com.v2ray.ang" />
++            android:targetPackage="com.click2ray.app" />
+         <categories android:name="android.shortcut.conversation" />
+     </shortcut>
+     <shortcut
+@@ -53,7 +53,7 @@
+         <intent
+             android:action="android.intent.action.VIEW"
+             android:targetClass="com.v2ray.ang.ui.shortcut.ScStopActivity"
+-            android:targetPackage="com.v2ray.ang" />
++            android:targetPackage="com.click2ray.app" />
+         <categories android:name="android.shortcut.conversation" />
+     </shortcut>
+ </shortcuts>
